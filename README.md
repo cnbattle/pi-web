@@ -1,19 +1,19 @@
-# pi-web
+# @cnbattle/pi-web
 
-[pi 编程智能体](https://github.com/badlogic/pi-mono) 的网页界面。在浏览器中浏览会话、与智能体对话、分叉对话、切换消息分支。
+[pi 编程智能体](https://github.com/badlogic/pi-mono) 的网页界面。基于 [@agegr/pi-web](https://github.com/agegr/pi-web) 增强，新增固定目录、工具配置面板等特性。
 
 ## 快速开始
 
 **无需安装，直接运行：**
 
 ```bash
-npx @agegr/pi-web@latest
+npx @cnbattle/pi-web@latest
 ```
 
 **或全局安装后使用：**
 
 ```bash
-npm install -g @agegr/pi-web
+npm install -g @cnbattle/pi-web
 pi-web
 ```
 
@@ -29,6 +29,17 @@ pi-web -p 8080 -H 127.0.0.1     # 组合使用
 PORT=8080 pi-web                 # 也支持环境变量
 ```
 
+## 新增特性
+
+- **📌 固定目录** — 在下拉菜单中固定常用工作目录，支持自定义别名
+- **🎯 CWD 别名显示** — 固定目录有别名时，按钮上优先显示别名
+- **🛠️ ToolsConfig 面板** — 按工具粒度独立开关（内置 + 扩展），替代旧的三档预设
+- **🔌 扩展工具可用** — pi-web 新建会话时扩展/package 工具不再被过滤
+- **🔗 扩展模型选择** — 扩展注册的 provider 出现在 Web 模型选择器中
+- **📜 智能滚动** — 用户滚动离开后不再强制跳到底部，显示「滚动到底部」按钮
+- **📊 HTML 表格渲染** — Markdown 中 HTML `<table>` 正常渲染
+- **⚡ 大会话优化** — 修复 1000+ 消息会话的栈溢出，增加 TTL 缓存
+
 ## 功能介绍
 
 - **会话浏览器** — 按工作目录分组展示所有 pi 会话
@@ -37,7 +48,8 @@ PORT=8080 pi-web                 # 也支持环境变量
 - **会话内分支** — 回退到任意节点继续对话，在同一文件内创建分支
 - **分支导航器** — 可视化切换同一会话内的各个分支
 - **模型切换** — 对话中途随时切换模型
-- **工具面板** — 控制智能体可使用的工具
+- **工具配置** — 按工具粒度独立开关，支持扩展工具
+- **固定目录** — 固定常用目录，支持别名，点击切换
 - **压缩会话** — 对长会话进行摘要，节省上下文窗口
 - **引导 / 追加** — 打断正在运行的智能体，或在其完成后追加消息
 
@@ -50,6 +62,8 @@ PORT=8080 pi-web                 # 也支持环境变量
 ## 开发
 
 ```bash
+git clone https://github.com/cnbattle/pi-web.git
+cd pi-web
 npm install
 npm run dev   # 端口 30141
 ```
@@ -64,12 +78,23 @@ app/
     files/         # 文件内容读取
     models/        # 可用模型列表与默认模型
     models-config/ # 读写 models.json
+    pinned-dirs/   # 固定目录管理 (新增)
+    tools/         # 工具配置管理 (新增)
 components/        # UI 组件
+  SessionSidebar   # 侧边栏（含固定目录）
+  ToolsConfig      # 工具配置面板 (新增)
+  ChatWindow       # 聊天窗口（含智能滚动）
 lib/
   session-reader.ts  # 解析 .jsonl 会话文件
-  rpc-manager.ts     # 管理 AgentSession 生命周期
+  rpc-manager.ts     # 管理 AgentSession 生命周期（含扩展工具修复）
   normalize.ts       # 规范化 toolCall 字段名
   types.ts
 ```
 
 会话文件存储路径：`~/.pi/agent/sessions/<编码后的工作目录>/<时间戳>_<uuid>.jsonl`
+
+## 链接
+
+- GitHub: https://github.com/cnbattle/pi-web
+- npm: https://www.npmjs.com/package/@cnbattle/pi-web
+- 上游项目: https://github.com/agegr/pi-web
