@@ -6,6 +6,7 @@ import { join, resolve, basename } from "path";
 interface PinnedDir {
   path: string;
   alias: string;
+  topped?: boolean;
 }
 
 function configPath(): string {
@@ -20,7 +21,7 @@ function readPinnedDirs(): PinnedDir[] {
     const raw = readFileSync(file, "utf-8");
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      // Migrate old format (string[]) to new format ({ path, alias }[])
+      // Migrate old format (string[]) to new format ({ path, alias, topped }[])
       const migrated = parsed.map((entry: unknown): PinnedDir | null => {
         if (typeof entry === "string") {
           return { path: entry, alias: basename(entry) };
@@ -28,7 +29,11 @@ function readPinnedDirs(): PinnedDir[] {
         if (typeof entry === "object" && entry !== null) {
           const e = entry as Record<string, unknown>;
           if (typeof e.path === "string") {
-            return { path: e.path, alias: typeof e.alias === "string" ? e.alias : basename(e.path) };
+            return {
+              path: e.path,
+              alias: typeof e.alias === "string" ? e.alias : basename(e.path),
+              topped: typeof e.topped === "boolean" ? e.topped : undefined,
+            };
           }
         }
         return null;
@@ -70,11 +75,11 @@ export async function GET() {
 }
 
 // POST /api/pinned-dirs — add or update a pinned directory
-// Body: { cwd: string, alias?: string }
+// Body: { cwd: string, alias?: string, topped?: boolean }
 // If cwd already exists, updates its alias. Otherwise adds a new entry.
 export async function POST(req: Request) {
   try {
-    const body = await req.json() as { cwd?: unknown; alias?: unknown };
+    const body = await req.json() as { cwd?: unknown; alias?: unknown; topped?: unknown };
     const cwd = typeof body.cwd === "string" ? body.cwd.trim() : "";
     if (!cwd) {
       return NextResponse.json({ error: "cwd is required" }, { status: 400 });
@@ -83,14 +88,45 @@ export async function POST(req: Request) {
     const alias = typeof body.alias === "string" && body.alias.trim()
       ? body.alias.trim()
       : basename(resolved);
+    const topped = typeof body.topped === "boolean" ? body.topped : undefined;
 
     let dirs = readPinnedDirs();
     const existingIndex = dirs.findIndex((d) => d.path === resolved);
     if (existingIndex >= 0) {
-      // Update alias
+      // Update alias and topped
       dirs[existingIndex] = { ...dirs[existingIndex], alias };
+      if (topped !== undefined) {
+        dirs[existingIndex].topped = topped;
+      }
     } else {
-      dirs.push({ path: resolved, alias });
+      dirs.push({ path: resolved, alias, topped });
+    }
+    writePinnedDirs(dirs);
+    return NextResponse.json({ success: true, dirs });
+  } catch (error) {
+    return NextResponse.json({ error: String(error) }, { status: 500 });
+  }
+}
+
+// PATCH /api/pinned-dirs — toggle topped status (only one can be topped)
+// Body: { cwd: string, topped: boolean }
+export async function PATCH(req: Request) {
+  try {
+    const body = await req.json() as { cwd?: unknown; topped?: unknown };
+    const cwd = typeof body.cwd === "string" ? body.cwd.trim() : "";
+    if (!cwd) {
+      return NextResponse.json({ error: "cwd is required" }, { status: 400 });
+    }
+    const resolved = resolve(cwd);
+    const topped = typeof body.topped === "boolean" ? body.topped : false;
+
+    let dirs = readPinnedDirs();
+    if (topped) {
+      // Only one can be topped — clear all, then set this one
+      dirs = dirs.map((d) => ({ ...d, topped: d.path === resolved }));
+    } else {
+      // Un-topped this one
+      dirs = dirs.map((d) => d.path === resolved ? { ...d, topped: false } : d);
     }
     writePinnedDirs(dirs);
     return NextResponse.json({ success: true, dirs });

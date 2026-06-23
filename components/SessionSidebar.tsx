@@ -7,6 +7,7 @@ import { FileExplorer } from "./FileExplorer";
 interface PinnedDir {
   path: string;
   alias: string;
+  topped?: boolean;
 }
 
 interface Props {
@@ -293,10 +294,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         // Session not found — notify parent so it can show the placeholder
         onInitialRestoreDone?.();
       }
-      const cwds = getRecentCwds(allSessions);
-      if (cwds.length > 0) setSelectedCwd(cwds[0]);
+      // Prefer pinned dirs: topped first, then first pinned, then recent sessions
+      if (pinnedDirs.length > 0) {
+        const topped = pinnedDirs.find((d) => d.topped);
+        setSelectedCwd(topped ? topped.path : pinnedDirs[0].path);
+      } else {
+        const cwds = getRecentCwds(allSessions);
+        if (cwds.length > 0) setSelectedCwd(cwds[0]);
+      }
     }
-  }, [allSessions, selectedCwd, initialSessionId, onSelectSession, onInitialRestoreDone]);
+  }, [allSessions, selectedCwd, initialSessionId, onSelectSession, onInitialRestoreDone, pinnedDirs]);
 
   const commitCustomPath = useCallback(async () => {
     const path = customPathValue.trim();
@@ -369,6 +376,23 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       // ignore
     }
   }, []);
+
+  const toggleTopped = useCallback(async (cwd: string) => {
+    const dir = pinnedDirs.find((d) => d.path === cwd);
+    if (!dir) return;
+    const newTopped = !dir.topped;
+    try {
+      const res = await fetch("/api/pinned-dirs", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd, topped: newTopped }),
+      });
+      const data = await res.json() as { dirs?: PinnedDir[] };
+      if (data.dirs) setPinnedDirs(data.dirs);
+    } catch {
+      // ignore
+    }
+  }, [pinnedDirs]);
 
   const openPinDialog = useCallback((cwd: string) => {
     const existing = pinnedDirs.find((d) => d.path === cwd);
@@ -595,7 +619,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   }}>
                     📌 Pinned
                   </div>
-                  {pinnedDirs.map((dir) => (
+                  {[...pinnedDirs].sort((a, b) => (b.topped ? 1 : 0) - (a.topped ? 1 : 0)).map((dir) => (
                     <div key={dir.path} style={{ display: "flex", alignItems: "center", borderBottom: "1px solid var(--border)" }}>
                       <button
                         onClick={() => {
@@ -629,31 +653,57 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                           </svg>
                         )}
                         {dir.path !== selectedCwd && <span style={{ width: 10, flexShrink: 0 }} />}
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="var(--text-dim)" stroke="var(--text-dim)" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                          <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" />
-                        </svg>
+                        {/* Star icon for topped */}
+                        {dir.topped ? (
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="#f59e0b" stroke="#f59e0b" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                          </svg>
+                        ) : (
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="var(--text-dim)" stroke="var(--text-dim)" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                            <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" />
+                          </svg>
+                        )}
                         <div style={{ flex: 1, overflow: "hidden" }}>
                           <div style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: dir.path === selectedCwd ? "var(--text)" : "var(--text)" }}>{dir.alias}</div>
                           <div style={{ fontSize: 10, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "var(--font-mono)" }}>{shortenCwd(dir.path, homeDir)}</div>
                         </div>
                       </button>
-                      <button
-                        onClick={() => { void unpinCwd(dir.path); }}
-                        title="Unpin"
-                        style={{
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          width: 28, height: 28, padding: 0, marginRight: 4, flexShrink: 0,
-                          background: "none", border: "none", borderRadius: 5,
-                          color: "var(--text-dim)", cursor: "pointer",
-                          transition: "color 0.12s, background 0.12s",
-                        }}
-                        onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; e.currentTarget.style.background = "var(--bg-hover)"; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
-                      >
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                        </svg>
-                      </button>
+                      <div style={{ display: "flex", gap: 2, marginRight: 4, flexShrink: 0 }}>
+                        <button
+                          onClick={() => { void toggleTopped(dir.path); }}
+                          title={dir.topped ? "取消置顶" : "置顶"}
+                          style={{
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            width: 28, height: 28, padding: 0,
+                            background: "none", border: "none", borderRadius: 5,
+                            color: dir.topped ? "#f59e0b" : "var(--text-dim)", cursor: "pointer",
+                            transition: "color 0.12s, background 0.12s",
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = dir.topped ? "#f59e0b" : "var(--text)"; e.currentTarget.style.background = "var(--bg-hover)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = dir.topped ? "#f59e0b" : "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill={dir.topped ? "#f59e0b" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => { void unpinCwd(dir.path); }}
+                          title="Unpin"
+                          style={{
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            width: 28, height: 28, padding: 0,
+                            background: "none", border: "none", borderRadius: 5,
+                            color: "var(--text-dim)", cursor: "pointer",
+                            transition: "color 0.12s, background 0.12s",
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; e.currentTarget.style.background = "var(--bg-hover)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </>
