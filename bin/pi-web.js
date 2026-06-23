@@ -32,14 +32,12 @@ const { values: cliArgs } = parseArgs({
   options: {
     port:     { type: "string", short: "p" },
     hostname: { type: "string", short: "H" },
-    "base-path": { type: "string", short: "b" },
   },
   strict: false,
 });
 
 const port     = cliArgs.port     ?? process.env.PORT     ?? "30141";
 const hostname = cliArgs.hostname ?? process.env.HOSTNAME ?? null;
-const basePath = cliArgs["base-path"] ?? process.env.BASE_PATH ?? "";
 
 if (!fs.existsSync(nextDir)) {
   console.error("Build artifacts not found. Please report this issue.");
@@ -54,7 +52,7 @@ if (hostname) nextArgs.push("-H", hostname);
 const child = spawn(process.execPath, [nextBin, ...nextArgs], {
   cwd: pkgDir,
   stdio: ["inherit", "pipe", "inherit"],
-  env: { ...process.env, NEXT_BASE_PATH: basePath },
+  env: { ...process.env },
 });
 
 let browserOpened = false;

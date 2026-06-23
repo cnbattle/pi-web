@@ -24,12 +24,9 @@ pi-web
 ```bash
 pi-web --port 8080               # 自定义端口
 pi-web --hostname 127.0.0.1      # 仅本机访问
-pi-web --base-path /pi-web       # 反代子路径（如挂载在 /pi-web/ 下）
 pi-web -p 8080 -H 127.0.0.1     # 组合使用
-pi-web -p 8080 -b /pi-web       # 端口 + 子路径
 
 PORT=8080 pi-web                 # 也支持环境变量
-BASE_PATH=/pi-web pi-web         # 子路径环境变量
 ```
 
 ## 新增特性
@@ -55,6 +52,27 @@ BASE_PATH=/pi-web pi-web         # 子路径环境变量
 - **固定目录** — 固定常用目录，支持别名，点击切换
 - **压缩会话** — 对长会话进行摘要，节省上下文窗口
 - **引导 / 追加** — 打断正在运行的智能体，或在其完成后追加消息
+
+## 反向代理
+
+如果通过 nginx 等反代将 pi-web 挂载在子路径下（如 `https://example.com/code/`），需要额外代理 `/_next/static` 路径，因为 Next.js 的静态资源路径是绝对路径，不会自动添加子路径前缀。
+
+**nginx 示例：**
+
+```nginx
+location /code/ {
+    proxy_pass http://127.0.0.1:30141/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+# 静态资源也需要转发
+location /_next/static {
+    proxy_pass http://127.0.0.1:30141;
+}
+```
 
 ## 注意事项
 

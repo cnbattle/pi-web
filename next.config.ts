@@ -9,11 +9,7 @@ try {
   piVersion = (JSON.parse(readFileSync(piPkgPath, "utf8")) as { version: string }).version;
 } catch { /* package not found, use default */ }
 
-const basePath = process.env.NEXT_BASE_PATH || "";
-
 const nextConfig: NextConfig = {
-  basePath,
-  assetPrefix: basePath || undefined,
   serverExternalPackages: ["@earendil-works/pi-coding-agent", "@earendil-works/pi-ai"],
   allowedDevOrigins: ['192.168.*.*', '127.0.0.1', 'localhost'],
   env: {
