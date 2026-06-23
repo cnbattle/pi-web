@@ -1,6 +1,6 @@
 {
   "name": "@cnbattle/pi-web",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "description": "Web UI for the pi coding agent (fork with pinned directories, tools config, and more)",
   "license": "MIT",
   "repository": {
