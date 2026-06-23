@@ -1,5 +1,7 @@
 import { createAgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
 import { cacheSessionPath } from "./session-reader";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
 import type { AgentSessionLike, ToolInfo } from "./pi-types";
 
 // ============================================================================
@@ -208,7 +210,21 @@ export class AgentSessionWrapper {
       }
 
       case "set_tools": {
-        this.inner.setActiveToolsByName(command.toolNames as string[]);
+        const names = command.toolNames as string[];
+        const exact = command.exact as boolean | undefined;
+        if (names.length === 0) {
+          // Disable all tools
+          this.inner.setActiveToolsByName([]);
+        } else if (exact) {
+          // From ToolsConfig: set EXACTLY these tools (user's explicit choice)
+          this.inner.setActiveToolsByName(names);
+        } else {
+          // From old preset: preserve all registered tools (extensions + built-in)
+          const allTools = this.inner.getAllTools();
+          const activeNames = new Set(names);
+          for (const t of allTools) activeNames.add(t.name);
+          this.inner.setActiveToolsByName([...activeNames]);
+        }
         return null;
       }
 
@@ -293,13 +309,33 @@ export async function startRpcSession(
       ? SessionManager.open(sessionFile, undefined)
       : SessionManager.create(cwd, undefined);
 
-    // Determine which tools to pass based on requested toolNames.
-    // Since v0.68.0, createAgentSession expects string[] tool names instead of Tool[] instances.
-    // Pass all built-in coding tool names by default; for "all off", pass empty array.
+    // Determine which tools to pass based on requested toolNames or saved config.
+    // Priority:
+    // 1. Frontend explicitly passed toolNames — use it
+    // 2. Saved activeTools in settings.json — use that (persisted across sessions by ToolsConfig panel)
+    // 3. Default: let core's includeAllExtensionTools handle it (all tools active)
     const allCodingToolNames = ["read", "bash", "edit", "write", "grep", "find", "ls"];
     let toolsOption: string[] | undefined;
     if (toolNames !== undefined) {
-      toolsOption = toolNames.length === 0 ? [] : allCodingToolNames;
+      // toolNames === [] -> "all off" (an empty allow-list disables every tool).
+      // Otherwise DO NOT pass a builtin-only allow-list: passing allCodingToolNames
+      // set allowedToolNames to coding builtins only, which filtered every
+      // extension/package-provided tool (e.g. subagents, web access) out of the
+      // tool registry — so they were unavailable in pi-web sessions even though the
+      // `pi` CLI keeps them. Leaving the allow-list unset lets the SDK register all
+      // tools (and activate extension tools); we narrow the ACTIVE set below.
+      toolsOption = toolNames.length === 0 ? [] : undefined;
+    } else {
+      // Read saved activeTools from settings.json (persisted by ToolsConfig panel)
+      try {
+        const settingsPath = join(agentDir, "settings.json");
+        if (existsSync(settingsPath)) {
+          const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+          if (Array.isArray(settings.activeTools)) {
+            toolsOption = settings.activeTools.length > 0 ? settings.activeTools : [];
+          }
+        }
+      } catch {}
     }
 
     const { session: inner } = await createAgentSession({
@@ -309,16 +345,17 @@ export async function startRpcSession(
       ...(toolsOption !== undefined ? { tools: toolsOption } : {}),
     });
 
-    // If specific tool names were requested (non-empty), narrow active tools now
-    if (toolNames && toolNames.length > 0) {
-      inner.setActiveToolsByName(toolNames);
-    }
-
-    // When all tools are disabled, clear the system prompt entirely.
-    // pi's buildSystemPrompt always produces a non-empty prompt even with no tools;
-    // the only way to truly clear it is to call agent.setSystemPrompt directly.
-    if (toolNames?.length === 0) {
-      inner.agent.state.systemPrompt = "";
+    // Apply exact tool list after creation, overriding includeAllExtensionTools.
+    if (toolsOption !== undefined) {
+      if (toolsOption.length === 0) {
+        inner.setActiveToolsByName([]);
+        inner.agent.state.systemPrompt = "";
+      } else {
+        // Preserve extension/package tools that aren't in the user's explicit list
+        const allTools = inner.getAllTools().map((t) => t.name);
+        const extensionToolNames = allTools.filter((name) => !allCodingToolNames.includes(name));
+        inner.setActiveToolsByName([...toolsOption, ...extensionToolNames]);
+      }
     }
 
     const wrapper = new AgentSessionWrapper(inner);
