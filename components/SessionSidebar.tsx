@@ -4,6 +4,11 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import type { SessionInfo } from "@/lib/types";
 import { FileExplorer } from "./FileExplorer";
 
+interface PinnedDir {
+  path: string;
+  alias: string;
+}
+
 interface Props {
   selectedSessionId: string | null;
   onSelectSession: (session: SessionInfo, isRestore?: boolean) => void;
@@ -208,6 +213,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [customPathError, setCustomPathError] = useState<string | null>(null);
   const [customPathValidating, setCustomPathValidating] = useState(false);
   const customPathInputRef = useRef<HTMLInputElement>(null);
+  const [pinnedDirs, setPinnedDirs] = useState<PinnedDir[]>([]);
+  const [aliasDialogOpen, setAliasDialogOpen] = useState(false);
+  const [aliasDialogCwd, setAliasDialogCwd] = useState<string | null>(null);
+  const [aliasValue, setAliasValue] = useState("");
+  const aliasInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [explorerOpen, setExplorerOpen] = useState(true);
   const [explorerKey, setExplorerKey] = useState(0);
@@ -250,6 +260,13 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   useEffect(() => {
     fetch("/api/home").then((r) => r.json()).then((d: { home?: string }) => {
       if (d.home) setHomeDir(d.home);
+    }).catch(() => {});
+  }, []);
+
+  // Load pinned directories
+  useEffect(() => {
+    fetch("/api/pinned-dirs").then((r) => r.json()).then((d: { dirs?: PinnedDir[] }) => {
+      if (d.dirs) setPinnedDirs(d.dirs);
     }).catch(() => {});
   }, []);
 
@@ -324,6 +341,64 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       // ignore
     }
   }, []);
+
+  const pinCwd = useCallback(async (cwd: string, alias: string) => {
+    try {
+      const res = await fetch("/api/pinned-dirs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd, alias }),
+      });
+      const data = await res.json() as { dirs?: PinnedDir[] };
+      if (data.dirs) setPinnedDirs(data.dirs);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const unpinCwd = useCallback(async (cwd: string) => {
+    try {
+      const res = await fetch("/api/pinned-dirs", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd }),
+      });
+      const data = await res.json() as { dirs?: PinnedDir[] };
+      if (data.dirs) setPinnedDirs(data.dirs);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const openPinDialog = useCallback((cwd: string) => {
+    const existing = pinnedDirs.find((d) => d.path === cwd);
+    const defaultAlias = cwd.split("/").filter(Boolean).pop() || cwd;
+    setAliasDialogCwd(cwd);
+    setAliasValue(existing?.alias ?? defaultAlias);
+    setAliasDialogOpen(true);
+    setTimeout(() => aliasInputRef.current?.focus(), 50);
+  }, [pinnedDirs]);
+
+  const commitPinDialog = useCallback(async () => {
+    if (!aliasDialogCwd) return;
+    await pinCwd(aliasDialogCwd, aliasValue.trim() || aliasDialogCwd.split("/").filter(Boolean).pop() || aliasDialogCwd);
+    setAliasDialogOpen(false);
+    setAliasDialogCwd(null);
+  }, [aliasDialogCwd, aliasValue, pinCwd]);
+
+  const cancelPinDialog = useCallback(() => {
+    setAliasDialogOpen(false);
+    setAliasDialogCwd(null);
+    setAliasValue("");
+  }, []);
+
+  function isPinned(cwd: string): boolean {
+    return pinnedDirs.some((d) => d.path === cwd);
+  }
+
+  function getAlias(cwd: string): string | undefined {
+    return pinnedDirs.find((d) => d.path === cwd)?.alias;
+  }
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -458,6 +533,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               width: "100%",
               display: "flex",
               alignItems: "center",
+              gap: 6,
               padding: "6px 10px",
               background: selectedCwd ? "var(--bg-hover)" : "rgba(37,99,235,0.06)",
               border: selectedCwd ? "1px solid var(--border)" : "1px solid rgba(37,99,235,0.4)",
@@ -469,6 +545,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               transition: "border-color 0.15s, background 0.15s",
             }}
           >
+            {selectedCwd && isPinned(selectedCwd) && (
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="var(--text-dim)" stroke="var(--text-dim)" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" />
+              </svg>
+            )}
             <span
               style={{
                 flex: 1,
@@ -481,7 +562,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               }}
               title={selectedCwd ?? ""}
             >
-              {selectedCwd ? shortenCwd(selectedCwd, homeDir) : (initialSessionId && !restoredRef.current ? "" : "Select project…")}
+              {selectedCwd ? (getAlias(selectedCwd) ?? shortenCwd(selectedCwd, homeDir)) : (initialSessionId && !restoredRef.current ? "" : "Select project…")}
             </span>
           </button>
 
@@ -500,45 +581,146 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 overflow: "hidden",
               }}
             >
-              {recentCwds.map((cwd) => (
-                <button
-                  key={cwd}
-                  onClick={() => {
-                    setSelectedCwd(cwd);
-                    setCustomPathOpen(false);
-                    setCustomPathValue("");
-                    setCustomPathError(null);
-                    setDropdownOpen(false);
-                  }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 7,
-                    width: "100%",
-                    padding: "8px 10px",
-                    background: cwd === selectedCwd ? "var(--bg-selected)" : "none",
-                    border: "none",
+              {/* Pinned directories section */}
+              {pinnedDirs.length > 0 && (
+                <>
+                  <div style={{
+                    padding: "6px 10px 4px",
+                    fontSize: 10,
+                    fontWeight: 600,
+                    color: "var(--text-dim)",
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
                     borderBottom: "1px solid var(--border)",
-                    color: cwd === selectedCwd ? "var(--text)" : "var(--text-muted)",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    fontSize: 11,
-                    fontFamily: "var(--font-mono)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                  title={cwd}
-                >
-                  {cwd === selectedCwd && (
-                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                      <polyline points="1.5 5 4 7.5 8.5 2.5" />
-                    </svg>
-                  )}
-                  {cwd !== selectedCwd && <span style={{ width: 10, flexShrink: 0 }} />}
-                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shortenCwd(cwd, homeDir)}</span>
-                </button>
-              ))}
+                  }}>
+                    📌 Pinned
+                  </div>
+                  {pinnedDirs.map((dir) => (
+                    <div key={dir.path} style={{ display: "flex", alignItems: "center", borderBottom: "1px solid var(--border)" }}>
+                      <button
+                        onClick={() => {
+                          setSelectedCwd(dir.path);
+                          setCustomPathOpen(false);
+                          setCustomPathValue("");
+                          setCustomPathError(null);
+                          setDropdownOpen(false);
+                        }}
+                        style={{
+                          flex: 1,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 7,
+                          padding: "8px 10px",
+                          background: dir.path === selectedCwd ? "var(--bg-selected)" : "none",
+                          border: "none",
+                          color: dir.path === selectedCwd ? "var(--text)" : "var(--text-muted)",
+                          cursor: "pointer",
+                          textAlign: "left",
+                          fontSize: 11,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                        title={dir.path}
+                      >
+                        {dir.path === selectedCwd && (
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                            <polyline points="1.5 5 4 7.5 8.5 2.5" />
+                          </svg>
+                        )}
+                        {dir.path !== selectedCwd && <span style={{ width: 10, flexShrink: 0 }} />}
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="var(--text-dim)" stroke="var(--text-dim)" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                          <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" />
+                        </svg>
+                        <div style={{ flex: 1, overflow: "hidden" }}>
+                          <div style={{ fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: dir.path === selectedCwd ? "var(--text)" : "var(--text)" }}>{dir.alias}</div>
+                          <div style={{ fontSize: 10, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "var(--font-mono)" }}>{shortenCwd(dir.path, homeDir)}</div>
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => { void unpinCwd(dir.path); }}
+                        title="Unpin"
+                        style={{
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          width: 28, height: 28, padding: 0, marginRight: 4, flexShrink: 0,
+                          background: "none", border: "none", borderRadius: 5,
+                          color: "var(--text-dim)", cursor: "pointer",
+                          transition: "color 0.12s, background 0.12s",
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = "#ef4444"; e.currentTarget.style.background = "var(--bg-hover)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
+                      >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </>
+              )}
+
+              {/* Recent CWDs section */}
+              {(() => {
+                const pinnedPaths = new Set(pinnedDirs.map((d) => d.path));
+                const displayCwds = recentCwds.filter((c) => !pinnedPaths.has(c));
+                if (displayCwds.length === 0) return null;
+                return (
+                  <>
+                    {pinnedDirs.length > 0 && (
+                      <div style={{
+                        padding: "6px 10px 4px",
+                        fontSize: 10,
+                        fontWeight: 600,
+                        color: "var(--text-dim)",
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                        borderBottom: "1px solid var(--border)",
+                      }}>
+                        Recent
+                      </div>
+                    )}
+                    {displayCwds.map((cwd) => (
+                      <button
+                        key={cwd}
+                        onClick={() => {
+                          setSelectedCwd(cwd);
+                          setCustomPathOpen(false);
+                          setCustomPathValue("");
+                          setCustomPathError(null);
+                          setDropdownOpen(false);
+                        }}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 7,
+                          width: "100%",
+                          padding: "8px 10px",
+                          background: cwd === selectedCwd ? "var(--bg-selected)" : "none",
+                          border: "none",
+                          borderBottom: "1px solid var(--border)",
+                          color: cwd === selectedCwd ? "var(--text)" : "var(--text-muted)",
+                          cursor: "pointer",
+                          textAlign: "left",
+                          fontSize: 11,
+                          fontFamily: "var(--font-mono)",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                        title={cwd}
+                      >
+                        {cwd === selectedCwd && (
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                            <polyline points="1.5 5 4 7.5 8.5 2.5" />
+                          </svg>
+                        )}
+                        {cwd !== selectedCwd && <span style={{ width: 10, flexShrink: 0 }} />}
+                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shortenCwd(cwd, homeDir)}</span>
+                      </button>
+                    ))}
+                  </>
+                );
+              })()}
 
               {/* Default cwd shortcut */}
               {!customPathOpen && (
@@ -552,7 +734,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     padding: "8px 10px",
                     background: "none",
                     border: "none",
-                    borderTop: recentCwds.length > 0 ? "1px solid var(--border)" : "none",
+                    borderTop: "1px solid var(--border)",
                     color: "var(--text-muted)",
                     cursor: "pointer",
                     textAlign: "left",
@@ -563,6 +745,39 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     <path d="M1 3A1 1 0 0 1 2 2H4L5 3.5H8.5a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-.5.5h-7A.5.5 0 0 1 1 8V3Z" />
                   </svg>
                   <span>Use default directory</span>
+                </button>
+              )}
+
+              {/* Pin / Unpin current directory */}
+              {selectedCwd && !customPathOpen && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isPinned(selectedCwd)) {
+                      void unpinCwd(selectedCwd);
+                    } else {
+                      openPinDialog(selectedCwd);
+                    }
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 7,
+                    width: "100%",
+                    padding: "8px 10px",
+                    background: isPinned(selectedCwd) ? "rgba(37,99,235,0.06)" : "none",
+                    border: "none",
+                    borderTop: "1px solid var(--border)",
+                    color: isPinned(selectedCwd) ? "var(--accent)" : "var(--text-muted)",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    fontSize: 11,
+                  }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill={isPinned(selectedCwd) ? "var(--accent)" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                    <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z" />
+                  </svg>
+                  <span>{isPinned(selectedCwd) ? "Unpin current directory" : "Pin current directory"}</span>
                 </button>
               )}
 
@@ -596,7 +811,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   <span>Custom path…</span>
                 </button>
               ) : (
-                <div style={{ padding: "6px 8px", borderTop: recentCwds.length > 0 ? "none" : undefined }}>
+                <div style={{ padding: "6px 8px" }}>
                   <input
                     ref={customPathInputRef}
                     value={customPathValue}
@@ -800,6 +1015,94 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               />
             </div>
           )}
+        </div>
+      )}
+
+      {/* Alias input dialog */}
+      {aliasDialogOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(0,0,0,0.4)",
+          }}
+          onClick={cancelPinDialog}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--bg)",
+              border: "1px solid var(--border)",
+              borderRadius: 12,
+              padding: "20px 24px",
+              width: 360,
+              maxWidth: "90vw",
+              boxShadow: "0 8px 30px rgba(0,0,0,0.15)",
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text)", marginBottom: 4 }}>
+              📌 Pin directory
+            </div>
+            <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 14 }}>
+              {aliasDialogCwd}
+            </div>
+            <input
+              ref={aliasInputRef}
+              value={aliasValue}
+              onChange={(e) => setAliasValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void commitPinDialog();
+                if (e.key === "Escape") cancelPinDialog();
+              }}
+              placeholder="Enter an alias for this directory"
+              style={{
+                width: "100%",
+                fontSize: 13,
+                padding: "8px 10px",
+                border: "1px solid var(--border)",
+                borderRadius: 7,
+                outline: "none",
+                background: "var(--bg)",
+                color: "var(--text)",
+                boxSizing: "border-box",
+              }}
+            />
+            <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
+              <button
+                onClick={cancelPinDialog}
+                style={{
+                  padding: "8px 16px",
+                  background: "var(--bg-hover)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 7,
+                  color: "var(--text-muted)",
+                  cursor: "pointer",
+                  fontSize: 12,
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void commitPinDialog()}
+                style={{
+                  padding: "8px 16px",
+                  background: "var(--accent)",
+                  border: "none",
+                  borderRadius: 7,
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
