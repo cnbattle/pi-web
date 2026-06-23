@@ -1,8 +1,16 @@
 {
-  "name": "@agegr/pi-web",
-  "version": "0.6.16",
-  "description": "Web UI for the pi coding agent",
+  "name": "@cnbattle/pi-web",
+  "version": "0.7.0",
+  "description": "Web UI for the pi coding agent (fork with pinned directories, tools config, and more)",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cnbattle/pi-web.git"
+  },
+  "keywords": ["pi-package", "pi", "pi-web", "coding-agent", "web-ui"],
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "pi-web": "bin/pi-web.js"
   },
