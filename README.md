@@ -24,9 +24,12 @@ pi-web
 ```bash
 pi-web --port 8080               # 自定义端口
 pi-web --hostname 127.0.0.1      # 仅本机访问
+pi-web --base-path /pi-web       # 反代子路径（如挂载在 /pi-web/ 下）
 pi-web -p 8080 -H 127.0.0.1     # 组合使用
+pi-web -p 8080 -b /pi-web       # 端口 + 子路径
 
 PORT=8080 pi-web                 # 也支持环境变量
+BASE_PATH=/pi-web pi-web         # 子路径环境变量
 ```
 
 ## 新增特性
