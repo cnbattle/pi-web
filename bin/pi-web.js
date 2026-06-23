@@ -63,10 +63,14 @@ child.stdout.on("data", (chunk) => {
   process.stdout.write(text);
   if (!browserOpened && text.includes("Ready")) {
     browserOpened = true;
-    const isWindows = process.platform === "win32";
-    const isMac = process.platform === "darwin";
-    const openCmd = isWindows ? "start" : isMac ? "open" : "xdg-open";
-    spawn(openCmd, [url], { shell: isWindows, stdio: "ignore", detached: true }).unref();
+    try {
+      const isWindows = process.platform === "win32";
+      const isMac = process.platform === "darwin";
+      const openCmd = isWindows ? "start" : isMac ? "open" : "xdg-open";
+      spawn(openCmd, [url], { shell: isWindows, stdio: "ignore", detached: true }).unref();
+    } catch {
+      // Browser opener not available (e.g. no xdg-open on server) — silently ignore
+    }
   }
 });
 
