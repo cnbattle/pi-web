@@ -226,6 +226,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [explorerRefreshDone, setExplorerRefreshDone] = useState(false);
   const sessionRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const explorerRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
 
   const loadSessions = useCallback(async (showLoading = false) => {
     try {
@@ -507,6 +509,68 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               </svg>
               New
             </button>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={!selectedCwd || uploading}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                background: uploading ? "rgba(37,99,235,0.1)" : "var(--bg-hover)",
+                border: uploading ? "1px solid rgba(37,99,235,0.4)" : "1px solid var(--border)",
+                color: uploading ? "var(--accent)" : selectedCwd ? "var(--text-muted)" : "var(--text-dim)",
+                cursor: selectedCwd && !uploading ? "pointer" : "not-allowed",
+                height: 32, padding: "0 8px", borderRadius: 7, fontSize: 12, fontWeight: 500,
+                letterSpacing: "-0.01em", flexShrink: 0, transition: "background 0.12s, color 0.12s, border-color 0.12s",
+              }}
+              title={uploading ? "Uploading..." : selectedCwd ? `Upload files to ${selectedCwd}` : "Select a project first"}
+              onMouseEnter={(e) => {
+                if (!selectedCwd || uploading) return;
+                e.currentTarget.style.background = "var(--bg-selected)";
+                e.currentTarget.style.color = "var(--accent)";
+                e.currentTarget.style.borderColor = "rgba(37,99,235,0.35)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = uploading ? "rgba(37,99,235,0.1)" : "var(--bg-hover)";
+                e.currentTarget.style.color = uploading ? "var(--accent)" : selectedCwd ? "var(--text-muted)" : "var(--text-dim)";
+                e.currentTarget.style.borderColor = uploading ? "rgba(37,99,235,0.4)" : "var(--border)";
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              {uploading ? "..." : "Upload"}
+            </button>
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".zip,.tar,.tar.gz,.tgz,.txt,.js,.ts,.tsx,.json,.yaml,.yml,.md,.css,.html,.sh,.py,.go,.rs,.java,.xml,.env,.gitignore,.toml,.cfg,.conf"
+              style={{ display: "none" }}
+              onChange={async (e) => {
+                const files = e.target.files;
+                if (!files || files.length === 0) return;
+                setUploading(true);
+                try {
+                  const form = new FormData();
+                  form.append("cwd", selectedCwd!);
+                  for (let i = 0; i < files.length; i++) form.append("files", files[i]);
+                  const res = await fetch("/api/upload", { method: "POST", body: form });
+                  const data = await res.json();
+                  if (data.summary) {
+                    alert(data.summary);
+                  } else if (data.error) {
+                    alert("Upload failed: " + data.error);
+                  }
+                } catch (err) {
+                  alert("Upload error: " + err);
+                } finally {
+                  setUploading(false);
+                  e.target.value = "";
+                }
+              }}
+            />
             <button
               onClick={() => loadSessions(false)}
               style={{
